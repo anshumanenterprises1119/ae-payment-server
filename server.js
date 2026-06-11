@@ -29,13 +29,25 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ─── CORS ─────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  'https://anshumanenterprises.online',
+  'https://www.anshumanenterprises.online',
+  'http://localhost:3000',
+  'http://127.0.0.1:5500',
+  'http://localhost:5500',
+];
+// Render/Railway preview URLs bhi allow karo
+if (process.env.FRONTEND_URL) ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
+
 app.use(cors({
-  origin: [
-    'https://anshumanenterprises.online',
-    'http://localhost:3000',
-    'http://127.0.0.1:5500',
-    'http://localhost:5500',
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Postman, curl, webhooks)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.onrender.com') || origin.endsWith('.railway.app')) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS blocked: ' + origin));
+  },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -43,13 +55,13 @@ app.use(cors({
 // ─── CONFIG ──────────────────────────────────────────────────────
 const CONFIG = {
   IS_SANDBOX: process.env.PHONEPE_SANDBOX !== 'false',
-  CLIENT_ID:     process.env.PHONEPE_CLIENT_ID     || 'YOUR_CLIENT_ID',
-  CLIENT_SECRET: process.env.PHONEPE_CLIENT_SECRET || 'YOUR_CLIENT_SECRET',
+  CLIENT_ID:      process.env.PHONEPE_CLIENT_ID     || 'YOUR_CLIENT_ID',
+  CLIENT_SECRET:  process.env.PHONEPE_CLIENT_SECRET || 'YOUR_CLIENT_SECRET',
   CLIENT_VERSION: 1,
-  SALT_KEY:   process.env.PHONEPE_SALT_KEY || '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399',
+  SALT_KEY:   process.env.PHONEPE_SALT_KEY  || '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399',
   SALT_INDEX: 1,
 
-  // Webhook basic auth (set these in PhonePe dashboard → Webhook settings)
+  // Webhook basic auth (PhonePe Dashboard → Webhook settings mein set karo)
   WEBHOOK_USERNAME: process.env.PHONEPE_WEBHOOK_USERNAME || '',
   WEBHOOK_PASSWORD: process.env.PHONEPE_WEBHOOK_PASSWORD || '',
 
@@ -59,9 +71,10 @@ const CONFIG = {
       : 'https://api.phonepe.com/apis/pg';
   },
 
-  SUCCESS_URL:  'https://anshumanenterprises.online/payment-success.html',
-  FAILURE_URL:  'https://anshumanenterprises.online/payment-failure.html',
-  CALLBACK_URL: 'https://pay.anshumanenterprises.online/callback',
+  SUCCESS_URL:  process.env.SUCCESS_URL  || 'https://anshumanenterprises.online/payment-success.html',
+  FAILURE_URL:  process.env.FAILURE_URL  || 'https://anshumanenterprises.online/payment-failure.html',
+  // CALLBACK_URL: Render/Railway URL + /callback — env se set karo
+  CALLBACK_URL: process.env.CALLBACK_URL || 'https://anshumanenterprises.online/callback',
 
   PRODUCT_NAME:   'Ultimate n8n AI Automation Pack',
   PRODUCT_AMOUNT: 349,
