@@ -1,0 +1,16 @@
+# ─── Node.js / npm ──────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log
+
+# ─── Secrets (NEVER commit this!) ───────
+.env
+
+# ─── Runtime logs ────────────────────────
+orders.log
+*.log
+
+# ─── OS junk ─────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
