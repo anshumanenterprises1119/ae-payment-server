@@ -350,6 +350,12 @@ app.get('/status/:merchantOrderId', async (req, res) => {
   }
 });
 
+// ── GET /callback ────────────────────────────────────────────────
+//  Some gateways send a GET request to validate the webhook URL
+app.get('/callback', (req, res) => {
+  return res.status(200).send('Webhook active');
+});
+
 // ── POST /callback ───────────────────────────────────────────────
 //  PhonePe POSTs payment result to this URL
 //  Docs: Verify Authorization header = sha256(username:password)
