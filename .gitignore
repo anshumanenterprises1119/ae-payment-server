@@ -5,6 +5,7 @@ yarn-error.log
 
 # ─── Secrets (NEVER commit this!) ───────
 .env
+render.yaml
 
 # ─── Runtime logs ────────────────────────
 orders.log

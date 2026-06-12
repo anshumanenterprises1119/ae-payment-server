@@ -58,8 +58,9 @@ const CONFIG = {
   CLIENT_ID:      process.env.PHONEPE_CLIENT_ID     || 'YOUR_CLIENT_ID',
   CLIENT_SECRET:  process.env.PHONEPE_CLIENT_SECRET || 'YOUR_CLIENT_SECRET',
   CLIENT_VERSION: 1,
-  SALT_KEY:   process.env.PHONEPE_SALT_KEY  || '099eb0cd-02cf-4e2a-8aca-3e6c6aff0399',
-  SALT_INDEX: 1,
+
+  // Note: SALT_KEY / SALT_INDEX are NOT needed for V2 OAuth flow.
+  // V2 uses Authorization: O-Bearer <access_token> instead of X-VERIFY checksum.
 
   // Webhook basic auth (PhonePe Dashboard → Webhook settings mein set karo)
   WEBHOOK_USERNAME: process.env.PHONEPE_WEBHOOK_USERNAME || '',
@@ -73,8 +74,9 @@ const CONFIG = {
 
   SUCCESS_URL:  process.env.SUCCESS_URL  || 'https://anshumanenterprises.online/payment-success.html',
   FAILURE_URL:  process.env.FAILURE_URL  || 'https://anshumanenterprises.online/payment-failure.html',
-  // CALLBACK_URL: Render/Railway URL + /callback — env se set karo
-  CALLBACK_URL: process.env.CALLBACK_URL || 'https://anshumanenterprises.online/callback',
+  // ⚠️ CALLBACK_URL MUST point to your deployed backend server, NOT the static website!
+  // Set this in .env: CALLBACK_URL=https://ae-payment-server.vercel.app/callback
+  CALLBACK_URL: process.env.CALLBACK_URL || 'https://ae-payment-server.vercel.app/callback',
 
   PRODUCT_NAME:   'Ultimate n8n AI Automation Pack',
   PRODUCT_AMOUNT: 349,
@@ -150,6 +152,7 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
       message: `Pay ₹${amount} for ${CONFIG.PRODUCT_NAME}`,
       merchantUrls: {
         redirectUrl: `${CONFIG.SUCCESS_URL}?orderId=${merchantOrderId}`,
+        callbackUrl: CONFIG.CALLBACK_URL,
       },
     },
   };
@@ -202,19 +205,33 @@ async function checkOrderStatus(merchantOrderId) {
 
 // ══════════════════════════════════════════════════════════════════
 //  Webhook Signature Verification
-//  PhonePe sends: Authorization header = sha256(username:password)
-//  Verify by computing hash locally and comparing
+//  PhonePe V2 sends: Authorization: Basic base64(username:password)
+//  Configure username/password in PhonePe Dashboard → Webhooks
+//  Then set PHONEPE_WEBHOOK_USERNAME and PHONEPE_WEBHOOK_PASSWORD in .env
 // ══════════════════════════════════════════════════════════════════
 function verifyWebhookSignature(authHeader) {
-  if (!CONFIG.WEBHOOK_USERNAME || !CONFIG.WEBHOOK_PASSWORD) return true; // skip if not configured
+  if (!CONFIG.WEBHOOK_USERNAME || !CONFIG.WEBHOOK_PASSWORD) {
+    console.warn('[Webhook] ⚠️ WEBHOOK_USERNAME/PASSWORD not configured — skipping auth check!');
+    return true; // skip if not configured (log warning)
+  }
   if (!authHeader) return false;
 
-  const expected = crypto
-    .createHash('sha256')
-    .update(`${CONFIG.WEBHOOK_USERNAME}:${CONFIG.WEBHOOK_PASSWORD}`)
-    .digest('hex');
+  // PhonePe sends "Basic <base64(username:password)>"
+  if (!authHeader.toLowerCase().startsWith('basic ')) return false;
 
-  return authHeader === expected;
+  try {
+    const base64Credentials = authHeader.replace(/^basic\s+/i, '');
+    const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+    const [username, password] = credentials.split(':');
+
+    // Use timing-safe comparison to prevent timing attacks
+    const usernameMatch = username === CONFIG.WEBHOOK_USERNAME;
+    const passwordMatch = password === CONFIG.WEBHOOK_PASSWORD;
+    return usernameMatch && passwordMatch;
+  } catch (err) {
+    console.error('[Webhook] Auth parsing error:', err.message);
+    return false;
+  }
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────
@@ -225,8 +242,16 @@ function generateOrderId() {
 }
 
 function logOrder(data) {
-  const logPath = path.join(__dirname, 'orders.log');
-  fs.appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), ...data }) + '\n', 'utf8');
+  const logData = { ts: new Date().toISOString(), ...data };
+  console.log('[Order Log]', JSON.stringify(logData));
+  try {
+    const logPath = process.env.VERCEL
+      ? path.join('/tmp', 'orders.log')
+      : path.join(__dirname, 'orders.log');
+    fs.appendFileSync(logPath, JSON.stringify(logData) + '\n', 'utf8');
+  } catch (err) {
+    console.warn('[logOrder] Could not write to log file:', err.message);
+  }
 }
 
 // ── Parse status into clean summary ──────────────────────────────
@@ -452,28 +477,35 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// ── GET /token-test (DEV ONLY) ────────────────────────────────────
-app.get('/token-test', async (req, res) => {
-  try {
-    const token = await getAccessToken();
-    res.json({
-      success:    true,
-      tokenSnippet: token.substring(0, 40) + '...',
-      expires:    new Date(tokenCache.expires_at).toISOString(),
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// ── DEV-ONLY ENDPOINTS ─────────────────────────────────────────────
+// These endpoints are only available in sandbox/development mode.
+// They are disabled in production to prevent data leakage.
+if (CONFIG.IS_SANDBOX || process.env.NODE_ENV === 'development') {
+  // ── GET /token-test (DEV ONLY) ──────────────────────────────────
+  app.get('/token-test', async (req, res) => {
+    try {
+      const token = await getAccessToken();
+      res.json({
+        success:    true,
+        tokenSnippet: token.substring(0, 40) + '...',
+        expires:    new Date(tokenCache.expires_at).toISOString(),
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
 
-// ── GET /orders (DEV ONLY) ────────────────────────────────────────
-app.get('/orders', (req, res) => {
-  const list = [];
-  for (const [id, info] of orderStore.entries()) {
-    list.push({ merchantOrderId: id, ...info });
-  }
-  res.json({ total: list.length, orders: list.slice(-20) }); // last 20
-});
+  // ── GET /orders (DEV ONLY) ──────────────────────────────────────
+  app.get('/orders', (req, res) => {
+    const list = [];
+    for (const [id, info] of orderStore.entries()) {
+      list.push({ merchantOrderId: id, ...info });
+    }
+    res.json({ total: list.length, orders: list.slice(-20) }); // last 20
+  });
+
+  console.log('[Dev] Dev-only endpoints enabled: /token-test, /orders');
+}
 
 // ══════════════════════════════════════════════════════════════════
 //  START SERVER

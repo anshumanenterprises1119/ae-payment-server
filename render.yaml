@@ -5,14 +5,14 @@ services:
     plan: free
     buildCommand: npm install
     startCommand: node server.js
-    envVars:
-      - key: PHONEPE_CLIENT_ID
-        value: M22SXD53UEY41_2606112015
-      - key: PHONEPE_CLIENT_SECRET
-        value: NzRjNGM1YzYtMjEwYi00ZGRhLWFjOWQtNGZjMzU4NTQwNTc3
-      - key: PHONEPE_SALT_KEY
-        value: 099eb0cd-02cf-4e2a-8aca-3e6c6aff0399
-      - key: PHONEPE_SANDBOX
-        value: "true"
-      - key: PORT
-        value: "3001"
+    # ⚠️ DO NOT put credentials here — use Render Dashboard → Environment Variables
+    # Required env vars to set in dashboard:
+    #   PHONEPE_CLIENT_ID
+    #   PHONEPE_CLIENT_SECRET
+    #   PHONEPE_SANDBOX (true/false)
+    #   PHONEPE_WEBHOOK_USERNAME
+    #   PHONEPE_WEBHOOK_PASSWORD
+    #   CALLBACK_URL (e.g. https://ae-payment-server.onrender.com/callback)
+    #   SUCCESS_URL
+    #   FAILURE_URL
+    #   PORT
