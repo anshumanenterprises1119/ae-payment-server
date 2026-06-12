@@ -100,7 +100,9 @@ async function getAccessToken() {
   }
 
   console.log('[Token] Fetching new access token...');
-  const url = `${CONFIG.BASE_URL}/v1/oauth/token`;
+  const url = CONFIG.IS_SANDBOX
+    ? 'https://api-preprod.phonepe.com/apis/pg-sandbox/v1/oauth/token'
+    : 'https://api.phonepe.com/apis/identity-manager/v1/oauth/token';
 
   const payload = new URLSearchParams({
     client_id:      CONFIG.CLIENT_ID,
