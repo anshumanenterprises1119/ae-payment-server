@@ -2,17 +2,24 @@ services:
   - type: web
     name: ae-payment-server
     runtime: node
-    plan: free
     buildCommand: npm install
     startCommand: node server.js
-    # ⚠️ DO NOT put credentials here — use Render Dashboard → Environment Variables
-    # Required env vars to set in dashboard:
-    #   PHONEPE_CLIENT_ID
-    #   PHONEPE_CLIENT_SECRET
-    #   PHONEPE_SANDBOX (true/false)
-    #   PHONEPE_WEBHOOK_USERNAME
-    #   PHONEPE_WEBHOOK_PASSWORD
-    #   CALLBACK_URL (e.g. https://ae-payment-server.onrender.com/callback)
-    #   SUCCESS_URL
-    #   FAILURE_URL
-    #   PORT
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: PHONEPE_SANDBOX
+        value: false
+      - key: PHONEPE_CLIENT_ID
+        sync: false
+      - key: PHONEPE_CLIENT_SECRET
+        sync: false
+      - key: PHONEPE_WEBHOOK_USERNAME
+        sync: false
+      - key: PHONEPE_WEBHOOK_PASSWORD
+        sync: false
+      - key: CALLBACK_URL
+        value: https://ae-payment-server.vercel.app/callback
+      - key: SUCCESS_URL
+        value: https://anshumanenterprises.online/payment-success.html
+      - key: FAILURE_URL
+        value: https://anshumanenterprises.online/payment-failure.html

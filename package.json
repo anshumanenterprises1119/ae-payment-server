@@ -1,26 +1,16 @@
 {
-  "name": "ae-phonepe-gateway",
+  "name": "payment-server",
   "version": "1.0.0",
-  "description": "Anshuman Enterprises — PhonePe V2 Payment Gateway Server",
+  "description": "PhonePe V2 Gateway Integration Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "keywords": ["phonepe", "payment-gateway", "nodejs"],
-  "author": "Anshuman Enterprises",
-  "license": "UNLICENSED",
-  "private": true,
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.6.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.0"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
   }
 }

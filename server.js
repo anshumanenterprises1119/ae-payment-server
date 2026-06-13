@@ -35,6 +35,8 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://127.0.0.1:5500',
   'http://localhost:5500',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
 ];
 // Render/Railway preview URLs bhi allow karo
 if (process.env.FRONTEND_URL) ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
@@ -43,7 +45,13 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (Postman, curl, webhooks)
     if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.onrender.com') || origin.endsWith('.railway.app')) {
+    if (
+      ALLOWED_ORIGINS.includes(origin) ||
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:') ||
+      origin.endsWith('.onrender.com') ||
+      origin.endsWith('.railway.app')
+    ) {
       return callback(null, true);
     }
     return callback(new Error('CORS blocked: ' + origin));
@@ -72,8 +80,8 @@ const CONFIG = {
       : 'https://api.phonepe.com/apis/pg';
   },
 
-  SUCCESS_URL:  process.env.SUCCESS_URL  || 'https://anshumanenterprises.online/payment-success.html',
-  FAILURE_URL:  process.env.FAILURE_URL  || 'https://anshumanenterprises.online/payment-failure.html',
+  SUCCESS_URL:  process.env.SUCCESS_URL  || 'https://anshumanenterprises.online/n8n/',
+  FAILURE_URL:  process.env.FAILURE_URL  || 'https://anshumanenterprises.online/n8n/',
   // ⚠️ CALLBACK_URL MUST point to your deployed backend server, NOT the static website!
   // Set this in .env: CALLBACK_URL=https://ae-payment-server.vercel.app/callback
   CALLBACK_URL: process.env.CALLBACK_URL || 'https://ae-payment-server.vercel.app/callback',
@@ -151,7 +159,9 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
       type: 'PG_CHECKOUT',
       message: `Pay ₹${amount} for ${CONFIG.PRODUCT_NAME}`,
       merchantUrls: {
-        redirectUrl: `${CONFIG.SUCCESS_URL}?orderId=${merchantOrderId}`,
+        redirectUrl: CONFIG.SUCCESS_URL.includes('?')
+          ? `${CONFIG.SUCCESS_URL}&orderId=${merchantOrderId}`
+          : `${CONFIG.SUCCESS_URL}?orderId=${merchantOrderId}`,
         callbackUrl: CONFIG.CALLBACK_URL,
       },
     },
@@ -285,6 +295,7 @@ function parseOrderStatus(raw) {
 // ── POST /initiate-phonepe-payment ───────────────────────────────
 //  Frontend calls this after lead form submit
 //  Returns: { success, redirectUrl, merchantOrderId }
+// app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'] ...
 app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], async (req, res) => {
   try {
     const { name = 'Customer', email = '', whatsapp = '', bizType = '', goals = '' } = req.body;
@@ -428,11 +439,6 @@ app.post('/callback', async (req, res) => {
             stored.confirmedAt = new Date().toISOString();
             stored.payment = parsed.successPayment;
           }
-
-          // TODO: Here you can trigger:
-          //  - Send Google Drive link via WhatsApp/Email
-          //  - Update Google Sheet via n8n webhook
-          //  - Send confirmation SMS via Fast2SMS
         }
       } catch (verifyErr) {
         console.error('[Webhook] Verify via status API failed:', verifyErr.message);
@@ -478,10 +484,7 @@ app.get('/health', async (req, res) => {
 });
 
 // ── DEV-ONLY ENDPOINTS ─────────────────────────────────────────────
-// These endpoints are only available in sandbox/development mode.
-// They are disabled in production to prevent data leakage.
 if (CONFIG.IS_SANDBOX || process.env.NODE_ENV === 'development') {
-  // ── GET /token-test (DEV ONLY) ──────────────────────────────────
   app.get('/token-test', async (req, res) => {
     try {
       const token = await getAccessToken();
@@ -495,13 +498,12 @@ if (CONFIG.IS_SANDBOX || process.env.NODE_ENV === 'development') {
     }
   });
 
-  // ── GET /orders (DEV ONLY) ──────────────────────────────────────
   app.get('/orders', (req, res) => {
     const list = [];
     for (const [id, info] of orderStore.entries()) {
       list.push({ merchantOrderId: id, ...info });
     }
-    res.json({ total: list.length, orders: list.slice(-20) }); // last 20
+    res.json({ total: list.length, orders: list.slice(-20) });
   });
 
   console.log('[Dev] Dev-only endpoints enabled: /token-test, /orders');
@@ -513,23 +515,9 @@ if (CONFIG.IS_SANDBOX || process.env.NODE_ENV === 'development') {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║   Anshuman Enterprises — PhonePe V2 Gateway Server        ║
-╠═══════════════════════════════════════════════════════════╣
-║   Port    : ${PORT}                                          ║
-║   Mode    : ${CONFIG.IS_SANDBOX ? 'SANDBOX (UAT)  ← Test Mode' : 'PRODUCTION ✅          '}   ║
-║   Base    : ${CONFIG.IS_SANDBOX ? 'api-preprod.phonepe.com' : 'api.phonepe.com         '}    ║
-╠═══════════════════════════════════════════════════════════╣
-║   ROUTES:                                                 ║
-║   POST /initiate-phonepe-payment → Create order           ║
-║   GET  /status/:orderId          → Check order status     ║
-║   POST /callback                 → PhonePe webhook        ║
-║   GET  /order-info/:orderId      → View order details     ║
-║   GET  /health                   → Health + token check   ║
-║   GET  /token-test               → Test token (dev only)  ║
-║   GET  /orders                   → Last 20 orders (dev)   ║
-╚═══════════════════════════════════════════════════════════╝
-`);
+  Server running on port ${PORT}
+  Mode: ${CONFIG.IS_SANDBOX ? 'SANDBOX' : 'PRODUCTION'}
+  `);
 });
 
 module.exports = app;
