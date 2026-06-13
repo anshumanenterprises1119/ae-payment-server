@@ -37,6 +37,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:5500',
   'http://localhost:8080',
   'http://127.0.0.1:8080',
+  'null',
 ];
 // Render/Railway preview URLs bhi allow karo
 if (process.env.FRONTEND_URL) ALLOWED_ORIGINS.push(process.env.FRONTEND_URL);
