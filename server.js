@@ -63,10 +63,14 @@ app.use(cors({
 
 // ─── CONFIG ──────────────────────────────────────────────────────
 const CONFIG = {
-  IS_SANDBOX: false, // Forced Production Mode
-  CLIENT_ID:      'SU2606121430539550011305', // Forced Production MID
-  CLIENT_SECRET:  '7814af7d-d5ac-4afa-9a8e-5abb10936373', // Forced Production Salt Key
+  CLIENT_ID:      'SU2606121430539550011305', // Forced Merchant ID
+  CLIENT_SECRET:  '7814af7d-d5ac-4afa-9a8e-5abb10936373', // Forced Client Secret
   CLIENT_VERSION: 1,
+
+  // Automatically detect if sandbox based on Merchant ID
+  get IS_SANDBOX() {
+    return this.CLIENT_ID.startsWith('SU') || this.CLIENT_ID.startsWith('PGTEST');
+  },
 
   // Note: SALT_KEY / SALT_INDEX are NOT needed for V2 OAuth flow.
   // V2 uses Authorization: O-Bearer <access_token> instead of X-VERIFY checksum.
