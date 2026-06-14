@@ -464,6 +464,129 @@ app.post('/callback', async (req, res) => {
   }
 });
 
+// ── POST /send-gift ───────────────────────────────────────────────
+//  Frontend calls this directly after lead form submission to send surprise gift via WhatsApp Cloud API securely
+app.post('/send-gift', async (req, res) => {
+  try {
+    const { name, whatsapp, profession = '' } = req.body;
+
+    if (!name || !whatsapp) {
+      return res.status(400).json({ success: false, message: 'Name and WhatsApp number are required.' });
+    }
+
+    // Clean phone number (remove +, spaces, ensure country code)
+    let formattedPhone = whatsapp.replace(/[^0-9]/g, '');
+    if (formattedPhone.length === 10) {
+      formattedPhone = '91' + formattedPhone; // assume Indian country code (+91) if 10 digits
+    }
+
+    // Generate personalized gift message using Gemini AI if key is present
+    let aiMessage = `Hello ${name}! Welcome to FutureWithAi. Here is your secret gift: the AI Company OS Blueprint Prompt! Download premium workflows here: https://github.com/nusquama/n8nworkflows.xyz`;
+    
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (GEMINI_API_KEY && profession) {
+      try {
+        console.log('[Gemini AI] Generating personalized gift message...');
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+        const geminiPayload = {
+          contents: [{
+            parts: [{
+              text: `Generate a warm, exciting, and professional WhatsApp message in English (or friendly Hinglish) for a user named "${name}" whose profession is "${profession}". Tell them that they have unlocked the FutureWithAi Automation Vault as their secret gift. Tell them to copy the AI Company OS Blueprint Prompt from the website or download premium automation files here: https://github.com/nusquama/n8nworkflows.xyz. Keep the message under 150 words, make it structured with bullet points or emojis, and make it sound customized for a ${profession}. Do not output any markdown formatting, HTML, or code blocks; just return the raw message text.`
+            }]
+          }]
+        };
+        const geminiResponse = await axios.post(geminiUrl, geminiPayload, {
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const generatedText = geminiResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (generatedText) {
+          aiMessage = generatedText.trim();
+          console.log('[Gemini AI] Custom message generated successfully.');
+        }
+      } catch (e) {
+        console.error('[Gemini AI] Generation failed, using default fallback message:', e.message);
+      }
+    }
+
+    // Send WhatsApp via custom endpoint if configured (e.g. n8n webhook or custom WhatsApp session)
+    const CUSTOM_ENDPOINT = process.env.WHATSAPP_CUSTOM_ENDPOINT;
+    if (CUSTOM_ENDPOINT) {
+      console.log(`[WhatsApp Custom] Forwarding AI message to custom endpoint: ${CUSTOM_ENDPOINT}...`);
+      await axios.post(CUSTOM_ENDPOINT, {
+        name,
+        whatsapp: formattedPhone,
+        profession,
+        message: aiMessage
+      });
+      console.log(`[WhatsApp Custom] Forwarded successfully to ${formattedPhone}`);
+      return res.json({ success: true, message: 'Message sent successfully via custom endpoint!' });
+    }
+
+    // Official Meta Cloud API integration
+    const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+    const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const TEMPLATE_NAME = process.env.WHATSAPP_TEMPLATE_NAME || 'surprise_gift';
+
+    if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
+      console.warn('[WhatsApp] API credentials missing in server environment variables — logging lead details instead');
+      console.log(`[WhatsApp Log] Target: ${formattedPhone} | Message: ${aiMessage}`);
+      return res.json({ 
+        success: true, 
+        message: 'Lead received.',
+        log: { name, whatsapp: formattedPhone, profession, message: aiMessage }
+      });
+    }
+
+    // Send WhatsApp Template Message using Meta Cloud API
+    const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+    
+    // Set template parameters based on template configuration count
+    const paramsCount = parseInt(process.env.WHATSAPP_TEMPLATE_PARAMS_COUNT || '1', 10);
+    const parameters = [{ type: "text", text: name }];
+    if (paramsCount > 1) {
+      parameters.push({ type: "text", text: aiMessage });
+    }
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to: formattedPhone,
+      type: "template",
+      template: {
+        name: TEMPLATE_NAME,
+        language: {
+          code: "en"
+        },
+        components: [
+          {
+            type: "body",
+            parameters: parameters
+          }
+        ]
+      }
+    };
+
+    console.log(`[WhatsApp] Sending surprise gift template to ${formattedPhone}...`);
+    
+    await axios.post(url, payload, {
+      headers: {
+        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    console.log(`[WhatsApp] Surprise gift sent successfully to ${formattedPhone}`);
+    return res.json({ success: true, message: 'Gift sent successfully via WhatsApp!' });
+
+  } catch (err) {
+    console.error('[WhatsApp] Send error:', err.response?.data || err.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to send WhatsApp message.', 
+      error: err.response?.data?.error?.message || err.message 
+    });
+  }
+});
+
 // ── GET /order-info/:merchantOrderId ─────────────────────────────
 //  Internal admin endpoint to view stored order details
 app.get('/order-info/:merchantOrderId', (req, res) => {
