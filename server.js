@@ -72,7 +72,7 @@ const CONFIG = {
 
   // Automatically detect if sandbox based on Merchant ID
   get IS_SANDBOX() {
-    return this.CLIENT_ID.startsWith('SU') || this.CLIENT_ID.startsWith('PGTEST');
+    return false; // Force production endpoints for live keys managed via production portal
   },
 
   // Note: SALT_KEY / SALT_INDEX are NOT needed for V2 OAuth flow.
@@ -156,6 +156,7 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
     merchantOrderId,
     amount: amount * 100,   // INR → paise (₹349 = 34900)
     expireAfter: 1200,      // session expires in 20 mins
+    callbackUrl: CONFIG.CALLBACK_URL,
     metaInfo: {
       udf1: customerName,
       udf2: customerEmail,
