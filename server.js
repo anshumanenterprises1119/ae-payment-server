@@ -465,18 +465,18 @@ app.post('/callback', async (req, res) => {
 });
 
 // ── POST /send-gift ───────────────────────────────────────────────
-//  Frontend calls this directly after lead form submission to send surprise gift via WhatsApp Cloud API securely
+//  Frontend calls this directly after lead form submission to send surprise gift via Google Apps Script & WhatsApp
 app.post('/send-gift', async (req, res) => {
   try {
-    const { name, whatsapp, profession = '' } = req.body;
+    const { name, email, whatsapp, profession = '' } = req.body;
 
-    if (!name || !whatsapp) {
-      return res.status(400).json({ success: false, message: 'Name and WhatsApp number are required.' });
+    if (!name || (!whatsapp && !email)) {
+      return res.status(400).json({ success: false, message: 'Name and either WhatsApp or Email are required.' });
     }
 
     // Clean phone number (remove +, spaces, ensure country code)
-    let formattedPhone = whatsapp.replace(/[^0-9]/g, '');
-    if (formattedPhone.length === 10) {
+    let formattedPhone = whatsapp ? whatsapp.replace(/[^0-9]/g, '') : '';
+    if (formattedPhone && formattedPhone.length === 10) {
       formattedPhone = '91' + formattedPhone; // assume Indian country code (+91) if 10 digits
     }
 
@@ -491,7 +491,7 @@ app.post('/send-gift', async (req, res) => {
         const geminiPayload = {
           contents: [{
             parts: [{
-              text: `Generate a warm, exciting, and professional WhatsApp message in English (or friendly Hinglish) for a user named "${name}" whose profession is "${profession}". Tell them that they have unlocked the FutureWithAi Automation Vault as their secret gift. Tell them to copy the AI Company OS Blueprint Prompt from the website or download premium automation files here: https://github.com/nusquama/n8nworkflows.xyz. Keep the message under 150 words, make it structured with bullet points or emojis, and make it sound customized for a ${profession}. Do not output any markdown formatting, HTML, or code blocks; just return the raw message text.`
+              text: `Generate a warm, exciting, and professional message in English (or friendly Hinglish) for a user named "${name}" whose profession is "${profession}". Tell them that they have unlocked the FutureWithAi Automation Vault as their secret gift. Tell them to copy the AI Company OS Blueprint Prompt from the website or download premium automation files here: https://github.com/nusquama/n8nworkflows.xyz. Make it sound extremely helpful, inspiring, and customized for a ${profession}, highlighting how n8n workflows can save them hours. Keep the message under 120 words, use formatting like bullet points or emojis, and write it in a friendly, professional tone. Do not output any markdown formatting, HTML, or code blocks; just return the raw text.`
             }]
           }]
         };
@@ -508,81 +508,134 @@ app.post('/send-gift', async (req, res) => {
       }
     }
 
-    // Send WhatsApp via custom endpoint if configured (e.g. n8n webhook or custom WhatsApp session)
-    const CUSTOM_ENDPOINT = process.env.WHATSAPP_CUSTOM_ENDPOINT;
-    if (CUSTOM_ENDPOINT) {
-      console.log(`[WhatsApp Custom] Forwarding AI message to custom endpoint: ${CUSTOM_ENDPOINT}...`);
-      await axios.post(CUSTOM_ENDPOINT, {
-        name,
-        whatsapp: formattedPhone,
-        profession,
-        message: aiMessage
-      });
-      console.log(`[WhatsApp Custom] Forwarded successfully to ${formattedPhone}`);
-      return res.json({ success: true, message: 'Message sent successfully via custom endpoint!' });
+    // Google Apps Script Email Delivery Route (Primary)
+    const GOOGLE_SCRIPT_URL = process.env.GOOGLE_SCRIPT_URL;
+    let emailSent = false;
+    let emailError = null;
+
+    if (GOOGLE_SCRIPT_URL && email) {
+      try {
+        console.log(`[Google Script] Triggering lead email via Apps Script: ${GOOGLE_SCRIPT_URL}...`);
+        const scriptResponse = await axios.post(GOOGLE_SCRIPT_URL, {
+          action: "lead_capture",
+          name,
+          email,
+          profession,
+          aiMessage
+        }, {
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (scriptResponse.data && scriptResponse.data.success) {
+          console.log(`[Google Script] Email successfully sent to ${email}`);
+          emailSent = true;
+        } else {
+          console.warn('[Google Script] Script returned non-success response:', scriptResponse.data);
+          emailError = scriptResponse.data?.message || 'Unknown Apps Script error';
+        }
+      } catch (e) {
+        console.error('[Google Script] Failed to trigger email via Apps Script:', e.message);
+        emailError = e.message;
+      }
+    } else {
+      console.warn('[Google Script] GOOGLE_SCRIPT_URL is not set or email is missing.');
     }
 
-    // Official Meta Cloud API integration
+    // Send WhatsApp via custom endpoint if configured (e.g. n8n webhook or custom WhatsApp session)
+    const CUSTOM_ENDPOINT = process.env.WHATSAPP_CUSTOM_ENDPOINT;
+    let whatsappSent = false;
+    if (CUSTOM_ENDPOINT && formattedPhone) {
+      try {
+        console.log(`[WhatsApp Custom] Forwarding AI message to custom endpoint: ${CUSTOM_ENDPOINT}...`);
+        await axios.post(CUSTOM_ENDPOINT, {
+          name,
+          whatsapp: formattedPhone,
+          profession,
+          message: aiMessage
+        });
+        console.log(`[WhatsApp Custom] Forwarded successfully to ${formattedPhone}`);
+        whatsappSent = true;
+      } catch (e) {
+        console.error('[WhatsApp Custom] Forwarding failed:', e.message);
+      }
+    }
+
+    // Official Meta Cloud API integration (Secondary fallback/dual delivery)
     const WHATSAPP_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
     const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const TEMPLATE_NAME = process.env.WHATSAPP_TEMPLATE_NAME || 'surprise_gift';
 
-    if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-      console.warn('[WhatsApp] API credentials missing in server environment variables — logging lead details instead');
-      console.log(`[WhatsApp Log] Target: ${formattedPhone} | Message: ${aiMessage}`);
+    if (WHATSAPP_TOKEN && PHONE_NUMBER_ID && formattedPhone && !whatsappSent) {
+      try {
+        const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
+        const paramsCount = parseInt(process.env.WHATSAPP_TEMPLATE_PARAMS_COUNT || '1', 10);
+        const parameters = [{ type: "text", text: name }];
+        if (paramsCount > 1) {
+          parameters.push({ type: "text", text: aiMessage });
+        }
+
+        const payload = {
+          messaging_product: "whatsapp",
+          to: formattedPhone,
+          type: "template",
+          template: {
+            name: TEMPLATE_NAME,
+            language: { code: "en" },
+            components: [{
+              type: "body",
+              parameters: parameters
+            }]
+          }
+        };
+
+        console.log(`[WhatsApp] Sending surprise gift template to ${formattedPhone}...`);
+        await axios.post(url, payload, {
+          headers: {
+            'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        console.log(`[WhatsApp] Surprise gift sent successfully to ${formattedPhone}`);
+        whatsappSent = true;
+      } catch (err) {
+        console.error('[WhatsApp] Meta Send error:', err.response?.data || err.message);
+      }
+    }
+
+    // Determine final status response
+    if (emailSent) {
       return res.json({ 
         success: true, 
-        message: 'Lead received.',
-        log: { name, whatsapp: formattedPhone, profession, message: aiMessage }
+        message: 'Lead processed. Secret gift sent to your Email address!',
+        emailSent,
+        whatsappSent
+      });
+    } else if (whatsappSent) {
+      return res.json({
+        success: true,
+        message: 'Lead processed. Secret gift sent to your WhatsApp!',
+        emailSent,
+        whatsappSent
+      });
+    } else {
+      // Fallback lead log if no delivery channels are active/succeeded
+      console.warn('[Server] No active delivery channel succeeded. Logging lead instead.');
+      return res.json({
+        success: true,
+        message: 'Lead captured successfully.',
+        log: { name, email, whatsapp: formattedPhone, profession, message: aiMessage },
+        emailSent: false,
+        whatsappSent: false,
+        error: emailError || 'No active mailing or WhatsApp gateway configured'
       });
     }
 
-    // Send WhatsApp Template Message using Meta Cloud API
-    const url = `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`;
-    
-    // Set template parameters based on template configuration count
-    const paramsCount = parseInt(process.env.WHATSAPP_TEMPLATE_PARAMS_COUNT || '1', 10);
-    const parameters = [{ type: "text", text: name }];
-    if (paramsCount > 1) {
-      parameters.push({ type: "text", text: aiMessage });
-    }
-
-    const payload = {
-      messaging_product: "whatsapp",
-      to: formattedPhone,
-      type: "template",
-      template: {
-        name: TEMPLATE_NAME,
-        language: {
-          code: "en"
-        },
-        components: [
-          {
-            type: "body",
-            parameters: parameters
-          }
-        ]
-      }
-    };
-
-    console.log(`[WhatsApp] Sending surprise gift template to ${formattedPhone}...`);
-    
-    await axios.post(url, payload, {
-      headers: {
-        'Authorization': `Bearer ${WHATSAPP_TOKEN}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    console.log(`[WhatsApp] Surprise gift sent successfully to ${formattedPhone}`);
-    return res.json({ success: true, message: 'Gift sent successfully via WhatsApp!' });
-
   } catch (err) {
-    console.error('[WhatsApp] Send error:', err.response?.data || err.message);
+    console.error('[send-gift] Server error:', err.message);
     return res.status(500).json({ 
       success: false, 
-      message: 'Failed to send WhatsApp message.', 
-      error: err.response?.data?.error?.message || err.message 
+      message: 'Failed to process lead capture.', 
+      error: err.message 
     });
   }
 });
