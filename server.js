@@ -63,17 +63,17 @@ app.use(cors({
 
 // ─── CONFIG ──────────────────────────────────────────────────────
 const CONFIG = {
-  IS_SANDBOX: process.env.PHONEPE_SANDBOX === 'true', // Sandbox is false by default unless PHONEPE_SANDBOX is 'true'
-  CLIENT_ID:      process.env.PHONEPE_CLIENT_ID     || 'SU2606121430539550011305',
-  CLIENT_SECRET:  process.env.PHONEPE_CLIENT_SECRET || '7814af7d-d5ac-4afa-9a8e-5abb10936373',
+  IS_SANDBOX: false, // Forced Production Mode
+  CLIENT_ID:      'SU2606121430539550011305', // Forced Production MID
+  CLIENT_SECRET:  '7814af7d-d5ac-4afa-9a8e-5abb10936373', // Forced Production Salt Key
   CLIENT_VERSION: 1,
 
   // Note: SALT_KEY / SALT_INDEX are NOT needed for V2 OAuth flow.
   // V2 uses Authorization: O-Bearer <access_token> instead of X-VERIFY checksum.
 
   // Webhook basic auth (PhonePe Dashboard → Webhook settings mein set karo)
-  WEBHOOK_USERNAME: process.env.PHONEPE_WEBHOOK_USERNAME || 'Anshumanenterprises1',
-  WEBHOOK_PASSWORD: process.env.PHONEPE_WEBHOOK_PASSWORD || 'Webhookanshuman1119',
+  WEBHOOK_USERNAME: 'Anshumanenterprises1',
+  WEBHOOK_PASSWORD: 'Webhookanshuman1119',
 
   get BASE_URL() {
     return this.IS_SANDBOX
@@ -81,11 +81,10 @@ const CONFIG = {
       : 'https://api.phonepe.com/apis/pg';
   },
 
-  SUCCESS_URL:  process.env.SUCCESS_URL  || 'https://futurewithai.anshumanenterprises.online/payment-success.html',
-  FAILURE_URL:  process.env.FAILURE_URL  || 'https://futurewithai.anshumanenterprises.online/payment-failure.html',
+  SUCCESS_URL:  'https://futurewithai.anshumanenterprises.online/payment-success.html',
+  FAILURE_URL:  'https://futurewithai.anshumanenterprises.online/payment-failure.html',
   // ⚠️ CALLBACK_URL MUST point to your deployed backend server, NOT the static website!
-  // Set this in .env: CALLBACK_URL=https://ae-payment-server.vercel.app/callback
-  CALLBACK_URL: process.env.CALLBACK_URL || 'https://ae-payment-server.vercel.app/callback',
+  CALLBACK_URL: 'https://ae-payment-server.vercel.app/callback',
 
   PRODUCT_NAME:   'Ultimate n8n AI Automation Pack',
   PRODUCT_AMOUNT: 349,
