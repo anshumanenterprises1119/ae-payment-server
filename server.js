@@ -156,7 +156,6 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
     merchantOrderId,
     amount: amount * 100,   // INR → paise (₹349 = 34900)
     expireAfter: 1200,      // session expires in 20 mins
-    callbackUrl: CONFIG.CALLBACK_URL,
     metaInfo: {
       udf1: customerName,
       udf2: customerEmail,
@@ -170,7 +169,6 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
         redirectUrl: CONFIG.SUCCESS_URL.includes('?')
           ? `${CONFIG.SUCCESS_URL}&orderId=${merchantOrderId}`
           : `${CONFIG.SUCCESS_URL}?orderId=${merchantOrderId}`,
-        callbackUrl: CONFIG.CALLBACK_URL,
       },
     },
   };
@@ -181,6 +179,7 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `O-Bearer ${accessToken}`,
+      'X-CALLBACK-URL': CONFIG.CALLBACK_URL,
     },
   });
 
