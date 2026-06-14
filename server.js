@@ -69,7 +69,7 @@ const CONFIG = {
 
   // Automatically detect if sandbox based on Merchant ID
   get IS_SANDBOX() {
-    return this.CLIENT_ID.startsWith('SU') || this.CLIENT_ID.startsWith('PGTEST');
+    return false; // Force Production mode to validate client credentials on live server
   },
 
   // Note: SALT_KEY / SALT_INDEX are NOT needed for V2 OAuth flow.
