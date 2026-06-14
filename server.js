@@ -32,6 +32,8 @@ app.use(express.urlencoded({ extended: true }));
 const ALLOWED_ORIGINS = [
   'https://anshumanenterprises.online',
   'https://www.anshumanenterprises.online',
+  'https://futurewithai.anshumanenterprises.online',
+  'https://www.futurewithai.anshumanenterprises.online',
   'http://localhost:3000',
   'http://127.0.0.1:5500',
   'http://localhost:5500',
@@ -51,7 +53,8 @@ app.use(cors({
       origin.startsWith('http://localhost:') ||
       origin.startsWith('http://127.0.0.1:') ||
       origin.endsWith('.onrender.com') ||
-      origin.endsWith('.railway.app')
+      origin.endsWith('.railway.app') ||
+      origin.endsWith('.anshumanenterprises.online')
     ) {
       return callback(null, true);
     }
