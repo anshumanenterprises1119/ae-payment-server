@@ -88,8 +88,8 @@ const CONFIG = {
       : 'https://api.phonepe.com/apis/pg';
   },
 
-  SUCCESS_URL:  'https://futurewithai.anshumanenterprises.online/payment-success.html',
-  FAILURE_URL:  'https://futurewithai.anshumanenterprises.online/payment-failure.html',
+  SUCCESS_URL:  'https://anshumanenterprises.online/payment-success.html',
+  FAILURE_URL:  'https://anshumanenterprises.online/payment-failure.html',
   // ⚠️ CALLBACK_URL MUST point to your deployed backend server, NOT the static website!
   CALLBACK_URL: 'https://ae-payment-server.vercel.app/callback',
 
