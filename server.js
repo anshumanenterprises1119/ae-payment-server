@@ -295,6 +295,65 @@ function parseOrderStatus(raw) {
   return { state, isPaid, isFailed, isPending, payments, successPayment, amount, orderId: raw.orderId, merchantOrderId: raw.merchantOrderId };
 }
 
+// ── Deliver Asset via Google Apps Script ─────────────────────────
+async function triggerAssetDelivery(merchantOrderId, rawPhonePeStatus) {
+  const GOOGLE_SCRIPT_URL = process.env.GOOGLE_SCRIPT_URL;
+  if (!GOOGLE_SCRIPT_URL) {
+    console.warn('[Delivery] ⚠️ GOOGLE_SCRIPT_URL is not set. Cannot deliver asset automatically.');
+    return { success: false, reason: 'GOOGLE_SCRIPT_URL not configured' };
+  }
+
+  try {
+    const stored = orderStore.get(merchantOrderId) || {};
+    
+    // Extract info from raw status or stored order
+    const name    = rawPhonePeStatus?.metaInfo?.udf1 || stored.name || 'Customer';
+    const email   = rawPhonePeStatus?.metaInfo?.udf2 || stored.email;
+    const phone   = rawPhonePeStatus?.metaInfo?.udf3 || stored.whatsapp || '';
+    
+    // Payment details
+    const payments = rawPhonePeStatus?.paymentDetails || [];
+    const successPayment = payments.find(p => p.state === 'COMPLETED') || {};
+    const txnId   = successPayment.transactionId || '';
+    const amount  = rawPhonePeStatus?.amount ? `₹${rawPhonePeStatus.amount / 100}` : '₹349';
+
+    if (!email) {
+      console.warn(`[Delivery] ⚠️ No email found for order ${merchantOrderId}. Cannot deliver asset.`);
+      return { success: false, reason: 'No customer email' };
+    }
+
+    console.log(`[Delivery] Triggering asset delivery to ${email} for order ${merchantOrderId}...`);
+
+    const response = await axios.post(GOOGLE_SCRIPT_URL, {
+      action: 'deliver_asset',
+      orderId: merchantOrderId,
+      txnId,
+      name,
+      email,
+      whatsapp: phone,
+      amount
+    }, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (response.data && response.data.success) {
+      console.log(`[Delivery] ✅ Apps Script delivery response:`, response.data);
+      
+      // Update in-memory status to record delivery
+      if (orderStore.has(merchantOrderId)) {
+        orderStore.get(merchantOrderId).assetDelivered = true;
+      }
+      return { success: true, data: response.data };
+    } else {
+      console.error(`[Delivery] ❌ Apps Script delivery failed:`, response.data);
+      return { success: false, error: response.data?.message || 'Apps Script returned non-success' };
+    }
+  } catch (error) {
+    console.error(`[Delivery] ❌ API call to Apps Script failed:`, error.message);
+    return { success: false, error: error.message };
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  ROUTES
 // ══════════════════════════════════════════════════════════════════
@@ -363,6 +422,13 @@ app.get('/status/:merchantOrderId', async (req, res) => {
     }
 
     logOrder({ event: 'STATUS_CHECK', merchantOrderId, state: parsed.state, isPaid: parsed.isPaid });
+
+    // Trigger automatic asset delivery if completed/paid
+    if (parsed.isPaid) {
+      triggerAssetDelivery(merchantOrderId, raw).catch(err => {
+        console.error(`[Status Check Delivery Fallback] Failed for ${merchantOrderId}:`, err.message);
+      });
+    }
 
     return res.json({
       success:         true,
@@ -446,6 +512,9 @@ app.post('/callback', async (req, res) => {
             stored.confirmedAt = new Date().toISOString();
             stored.payment = parsed.successPayment;
           }
+
+          // Trigger automatic asset delivery
+          await triggerAssetDelivery(merchantOrderId, raw);
         }
       } catch (verifyErr) {
         console.error('[Webhook] Verify via status API failed:', verifyErr.message);
