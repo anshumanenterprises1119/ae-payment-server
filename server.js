@@ -94,7 +94,18 @@ const CONFIG = {
   CALLBACK_URL: 'https://ae-payment-server.vercel.app/callback',
 
   PRODUCT_NAME:   'Ultimate n8n AI Automation Pack',
-  PRODUCT_AMOUNT: 349,
+  PRODUCT_AMOUNT: 349,  // Early bird price
+
+  // ── Limited Time Offer ──────────────────────────────────
+  // Offer ends: June 17, 2026 08:46 IST = 2026-06-17T03:16:00Z
+  OFFER_END_MS:   new Date('2026-06-17T03:16:00Z').getTime(),
+  EARLY_PRICE:    349,  // price in first 24 hours
+  REGULAR_PRICE:  399,  // price after offer expires
+
+  // Returns correct price based on current time
+  get CURRENT_PRICE() {
+    return Date.now() < this.OFFER_END_MS ? this.EARLY_PRICE : this.REGULAR_PRICE;
+  },
 };
 
 // ─── TOKEN CACHE ─────────────────────────────────────────────────
@@ -360,8 +371,7 @@ async function triggerAssetDelivery(merchantOrderId, rawPhonePeStatus) {
 
 // ── POST /initiate-phonepe-payment ───────────────────────────────
 //  Frontend calls this after lead form submit
-//  Returns: { success, redirectUrl, merchantOrderId }
-// app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'] ...
+//  Returns: { success, redirectUrl, merchantOrderId, amount }
 app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], async (req, res) => {
   try {
     const { name = 'Customer', email = '', whatsapp = '', bizType = '', goals = '' } = req.body;
@@ -370,6 +380,19 @@ app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], asy
       return res.status(400).json({ success: false, message: 'Email ya WhatsApp number zaroori hai.' });
     }
 
+    // ── Dynamic pricing (server-enforced) ────────────────────────────
+    // Server independently decides price based on offer window.
+    // Frontend sends `amount` as a hint, but server overrides if offer expired.
+    const offerActive = Date.now() < CONFIG.OFFER_END_MS;
+    const ALLOWED     = [CONFIG.EARLY_PRICE, CONFIG.REGULAR_PRICE, 300];
+    const requested   = parseInt(req.body.amount || 0);
+    // Accept frontend hint only if offer is still active AND amount is valid
+    const safeAmount  = offerActive && ALLOWED.includes(requested)
+      ? requested
+      : (offerActive ? CONFIG.EARLY_PRICE : CONFIG.REGULAR_PRICE);
+
+    console.log(`[initiate] Offer active: ${offerActive} | Price: ₹${safeAmount}`);
+
     const merchantOrderId = generateOrderId();
 
     const order = await createPaymentOrder({
@@ -377,18 +400,24 @@ app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], asy
       customerName:  name,
       customerEmail: email,
       customerPhone: whatsapp,
-      amount: CONFIG.PRODUCT_AMOUNT,
+      amount: safeAmount,
     });
 
     // Store order info in memory for webhook cross-reference
-    orderStore.set(merchantOrderId, { name, email, whatsapp, bizType, goals, state: 'PENDING', createdAt: new Date().toISOString() });
+    orderStore.set(merchantOrderId, {
+      name, email, whatsapp, bizType, goals,
+      amount: safeAmount,
+      state: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
 
-    logOrder({ event: 'ORDER_CREATED', merchantOrderId, phonePeOrderId: order.phonePeOrderId, name, email, whatsapp, bizType });
+    logOrder({ event: 'ORDER_CREATED', merchantOrderId, phonePeOrderId: order.phonePeOrderId, name, email, whatsapp, bizType, amount: safeAmount });
 
     return res.json({
       success: true,
       redirectUrl: order.redirectUrl,
       merchantOrderId,
+      amount: safeAmount,
       message: 'Payment order created successfully',
     });
 
@@ -401,6 +430,7 @@ app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], asy
     });
   }
 });
+
 
 // ── GET /status/:merchantOrderId ─────────────────────────────────
 //  Frontend polls this after redirect to confirm payment

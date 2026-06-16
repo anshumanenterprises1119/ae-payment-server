@@ -45,13 +45,17 @@ function doGet(e) {
       var email = (raw.metaInfo && raw.metaInfo.udf2) || "";
       var phone = (raw.metaInfo && raw.metaInfo.udf3) || "";
       
+      // ── First-24-hours launch buyer detection ──────────────────
+      var launchTime = parseInt(PropertiesService.getScriptProperties().getProperty("OFFER_LAUNCH_TIME") || "0");
+      var isLaunchBuyer = launchTime > 0 && (Date.now() - launchTime) <= 86400000; // 24 hrs in ms
+      
       if (isPaid) {
         var sheet = getOrCreateSheet("Sales Log");
         var alreadyDelivered = checkDuplicateOrder(sheet, orderId);
         
         if (!alreadyDelivered && email) {
           // Send Main Assets Email
-          sendAssetEmail(name, email, orderId, txnId, amount);
+          sendAssetEmail(name, email, orderId, txnId, amount, isLaunchBuyer);
           
           // Log sale details to Google Sheet and mark Email Sent as YES
           updateOrderStatusInSheet(sheet, orderId, txnId, "COMPLETED", "YES");
@@ -115,11 +119,15 @@ function doPost(e) {
           var email = (raw.metaInfo && raw.metaInfo.udf2) || "";
           var phone = (raw.metaInfo && raw.metaInfo.udf3) || "";
           
+          // ── First-24-hours launch buyer detection ────────────────
+          var launchTime = parseInt(PropertiesService.getScriptProperties().getProperty("OFFER_LAUNCH_TIME") || "0");
+          var isLaunchBuyer = launchTime > 0 && (Date.now() - launchTime) <= 86400000;
+          
           var sheet = getOrCreateSheet("Sales Log");
           var alreadyDelivered = checkDuplicateOrder(sheet, merchantOrderId);
           
           if (!alreadyDelivered && email) {
-            sendAssetEmail(name, email, merchantOrderId, txnId, amount);
+            sendAssetEmail(name, email, merchantOrderId, txnId, amount, isLaunchBuyer);
             updateOrderStatusInSheet(sheet, merchantOrderId, txnId, "COMPLETED", "YES");
           }
         }
@@ -135,7 +143,31 @@ function doPost(e) {
       var phone = data.whatsapp || data.phone || "";
       var bizType = data.bizType || "";
       
-      var orderDetails = createPaymentOrder(name, email, phone, bizType);
+      // ── Dynamic pricing (server-enforced in Apps Script too) ───────────
+      var OFFER_END_MS = new Date('2026-06-17T03:16:00Z').getTime();
+      var EARLY_PRICE  = 349;
+      var REGULAR_PRICE = 399;
+      var FLASH_PRICE   = 300;
+      var offerActive  = Date.now() < OFFER_END_MS;
+      var requestedAmt = parseInt(data.amount || 0);
+      
+      // Flash price (₹300) is only valid on June 17, 2026 IST
+      var nowDate = new Date();
+      var istOffset = 5.5 * 60 * 60 * 1000;
+      var istDate = new Date(nowDate.getTime() + istOffset);
+      var istDateStr = istDate.getUTCFullYear() + '-' +
+                       ('0' + (istDate.getUTCMonth() + 1)).slice(-2) + '-' +
+                       ('0' + istDate.getUTCDate()).slice(-2);
+      var isFlashDay = (istDateStr === '2026-06-17');
+      
+      var allowedPrices = [EARLY_PRICE, REGULAR_PRICE];
+      if (isFlashDay) allowedPrices.push(FLASH_PRICE);
+      
+      var finalAmount = allowedPrices.indexOf(requestedAmt) !== -1
+        ? requestedAmt
+        : (offerActive ? EARLY_PRICE : REGULAR_PRICE);
+      
+      var orderDetails = createPaymentOrder(name, email, phone, bizType, finalAmount);
       return jsonResponse(orderDetails);
     }
     
@@ -204,9 +236,15 @@ function getAccessToken() {
   }
 }
 
-function createPaymentOrder(name, email, phone, bizType) {
+function createPaymentOrder(name, email, phone, bizType, amountINR) {
   var accessToken = getAccessToken();
   var merchantOrderId = generateOrderId();
+  
+  // Use passed amount, fallback to server-side dynamic pricing
+  var OFFER_END_MS  = new Date('2026-06-17T03:16:00Z').getTime();
+  var finalINR      = amountINR || (Date.now() < OFFER_END_MS ? 349 : 399);
+  var finalPaise    = finalINR * 100;
+  var priceDisplay  = "₹" + finalINR;
   
   var props = PropertiesService.getScriptProperties();
   var callbackUrl = props.getProperty("CALLBACK_URL") || ScriptApp.getService().getUrl();
@@ -222,7 +260,7 @@ function createPaymentOrder(name, email, phone, bizType) {
   
   var payload = {
     merchantOrderId: merchantOrderId,
-    amount: 34900, // ₹349 in paise
+    amount: finalPaise,
     expireAfter: 1200,
     metaInfo: {
       udf1: name,
@@ -232,7 +270,7 @@ function createPaymentOrder(name, email, phone, bizType) {
     },
     paymentFlow: {
       type: "PG_CHECKOUT",
-      message: "Pay ₹349 for Ultimate n8n AI Automation Pack",
+      message: "Pay " + priceDisplay + " for Ultimate n8n AI Automation Pack",
       merchantUrls: {
         redirectUrl: successUrl + "?orderId=" + merchantOrderId
       }
@@ -264,7 +302,7 @@ function createPaymentOrder(name, email, phone, bizType) {
       name,
       email,
       phone,
-      "₹349",
+      priceDisplay,
       "PENDING",
       "NO"
     ]);
@@ -272,7 +310,8 @@ function createPaymentOrder(name, email, phone, bizType) {
     return {
       success: true,
       redirectUrl: data.redirectUrl,
-      merchantOrderId: merchantOrderId
+      merchantOrderId: merchantOrderId,
+      amount: finalINR
     };
   } else {
     throw new Error("PhonePe pay initiation failed: " + JSON.stringify(data));
@@ -299,11 +338,45 @@ function checkOrderStatus(merchantOrderId) {
 }
 
 // ── EMAIL DISPATCH TEMPLATES ───────────────────────────────────────
-function sendAssetEmail(name, email, orderId, txnId, amount) {
-  var subject = "🎉 Access Granted: Ultimate n8n AI Automation Pack - FutureWithAi";
+function sendAssetEmail(name, email, orderId, txnId, amount, isLaunchBuyer) {
+  var subject = isLaunchBuyer
+    ? "🎉 Access Granted + Special Founder Note – Ultimate n8n AI Automation Pack"
+    : "🎉 Access Granted: Ultimate n8n AI Automation Pack - FutureWithAi";
   
-  var htmlBody = `
-  <!DOCTYPE html>
+  // ── Special Launch Buyer Note HTML block ────────────────────────
+  var launchNoteHtml = isLaunchBuyer ? `
+    <div style="margin: 30px 0; padding: 28px; background: linear-gradient(135deg, #fff8f0, #fff3e6); border: 2px solid #ff8a00; border-radius: 12px; border-left: 6px solid #ff8a00;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+        <span style="font-size:28px;">✍️</span>
+        <h3 style="margin:0; font-size:18px; color:#b34500; font-weight:800;">A Personal Note from Aditya — Founder, FutureWithAi</h3>
+      </div>
+      <p style="margin:0 0 12px 0; font-size:15px; color:#333; line-height:1.7;">
+        Hey <strong>${name}</strong>,
+      </p>
+      <p style="margin:0 0 12px 0; font-size:15px; color:#333; line-height:1.7;">
+        You're one of the very first people to join the FutureWithAi family — and that genuinely means the world to me. 🙏
+      </p>
+      <p style="margin:0 0 12px 0; font-size:15px; color:#333; line-height:1.7;">
+        I built this pack over months, crafting every single workflow with one goal: to save founders, freelancers, and creators like you <strong>hundreds of hours</strong> of repetitive work every year.
+      </p>
+      <p style="margin:0 0 12px 0; font-size:15px; color:#333; line-height:1.7;">
+        You didn't just buy a product — you believed in something early. That kind of trust is rare, and I don't take it lightly.
+      </p>
+      <p style="margin:0 0 16px 0; font-size:15px; color:#333; line-height:1.7;">
+        If you ever have a question, want help setting up a workflow, or just want to chat about automation — reply directly to this email. I personally read every message.
+      </p>
+      <p style="margin:0; font-size:15px; color:#b34500; font-weight:700; line-height:1.7;">
+        Thank you for being a Day-1 supporter. Let's build something great together. 🚀
+      </p>
+      <p style="margin:20px 0 0 0; font-size:14px; color:#555;">
+        Warm regards,<br>
+        <strong>Aditya Tiwari</strong><br>
+        Founder, FutureWithAi &amp; Anshuman Enterprises<br>
+        <a href="mailto:anshumanenterprises1119@gmail.com" style="color:#ff8a00;">anshumanenterprises1119@gmail.com</a>
+      </p>
+    </div>
+  ` : "";
+  var htmlBody = `<!DOCTYPE html>
   <html>
   <head>
     <style>
@@ -334,6 +407,7 @@ function sendAssetEmail(name, email, orderId, txnId, amount) {
       </div>
       <div class="content">
         <div class="welcome">Hello ${name},</div>
+        ${launchNoteHtml}
         <p>Thank you for your purchase! Your payment has been successfully processed and verified. You now have lifetime access to the <strong>Ultimate n8n AI Automation Pack</strong>.</p>
         
         <div class="details-box">
