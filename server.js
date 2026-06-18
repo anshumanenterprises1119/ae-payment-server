@@ -159,9 +159,10 @@ async function getAccessToken() {
 //  Header: Authorization: O-Bearer <access_token>
 //  Returns: { orderId, redirectUrl, state: "PENDING" }
 // ══════════════════════════════════════════════════════════════════
-async function createPaymentOrder({ merchantOrderId, customerName, customerEmail, customerPhone, amount }) {
+async function createPaymentOrder({ merchantOrderId, customerName, customerEmail, customerPhone, amount, products }) {
   const accessToken = await getAccessToken();
   const url = `${CONFIG.BASE_URL}/checkout/v2/pay`;
+  const productName = products || CONFIG.PRODUCT_NAME;
 
   const payload = {
     merchantOrderId,
@@ -171,11 +172,11 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
       udf1: customerName,
       udf2: customerEmail,
       udf3: customerPhone,
-      udf4: CONFIG.PRODUCT_NAME,
+      udf4: productName,
     },
     paymentFlow: {
       type: 'PG_CHECKOUT',
-      message: `Pay ₹${amount} for ${CONFIG.PRODUCT_NAME}`,
+      message: `Pay ₹${amount} for ${productName}`,
       merchantUrls: {
         redirectUrl: CONFIG.SUCCESS_URL.includes('?')
           ? `${CONFIG.SUCCESS_URL}&orderId=${merchantOrderId}`
@@ -326,23 +327,25 @@ async function triggerAssetDelivery(merchantOrderId, rawPhonePeStatus) {
     const payments = rawPhonePeStatus?.paymentDetails || [];
     const successPayment = payments.find(p => p.state === 'COMPLETED') || {};
     const txnId   = successPayment.transactionId || '';
-    const amount  = rawPhonePeStatus?.amount ? `₹${rawPhonePeStatus.amount / 100}` : '₹349';
+    const amount  = rawPhonePeStatus?.amount ? (rawPhonePeStatus.amount / 100) : (stored.amount || 349);
+    const productsList = stored.productIds || stored.products || rawPhonePeStatus?.metaInfo?.udf4 || 'n8n-pack';
 
     if (!email) {
       console.warn(`[Delivery] ⚠️ No email found for order ${merchantOrderId}. Cannot deliver asset.`);
       return { success: false, reason: 'No customer email' };
     }
 
-    console.log(`[Delivery] Triggering asset delivery to ${email} for order ${merchantOrderId}...`);
+    console.log(`[Delivery] Triggering asset delivery to ${email} for order ${merchantOrderId} with products: ${productsList}...`);
 
     const response = await axios.post(GOOGLE_SCRIPT_URL, {
-      action: 'deliver_asset',
       orderId: merchantOrderId,
-      txnId,
+      transactionId: txnId,
       name,
       email,
       whatsapp: phone,
-      amount
+      amount,
+      products: productsList,
+      status: 'COMPLETED'
     }, {
       headers: { 'Content-Type': 'application/json' }
     });
@@ -374,24 +377,18 @@ async function triggerAssetDelivery(merchantOrderId, rawPhonePeStatus) {
 //  Returns: { success, redirectUrl, merchantOrderId, amount }
 app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], async (req, res) => {
   try {
-    const { name = 'Customer', email = '', whatsapp = '', bizType = '', goals = '' } = req.body;
+    const { name = 'Customer', email = '', whatsapp = '', bizType = '', goals = '', amount = 0, products = '', productIds = '' } = req.body;
 
     if (!email && !whatsapp) {
       return res.status(400).json({ success: false, message: 'Email ya WhatsApp number zaroori hai.' });
     }
 
-    // ── Dynamic pricing (server-enforced) ────────────────────────────
-    // Server independently decides price based on offer window.
-    // Frontend sends `amount` as a hint, but server overrides if offer expired.
-    const offerActive = Date.now() < CONFIG.OFFER_END_MS;
-    const ALLOWED     = [CONFIG.EARLY_PRICE, CONFIG.REGULAR_PRICE, 300];
-    const requested   = parseInt(req.body.amount || 0);
-    // Accept frontend hint only if offer is still active AND amount is valid
-    const safeAmount  = offerActive && ALLOWED.includes(requested)
-      ? requested
-      : (offerActive ? CONFIG.EARLY_PRICE : CONFIG.REGULAR_PRICE);
+    // ── Dynamic pricing ──────────────────────────────────────────────
+    // Accept dynamic cart amount if provided and greater than 0, otherwise fallback to CONFIG.REGULAR_PRICE
+    const requested = parseInt(amount || 0);
+    const safeAmount = requested > 0 ? requested : CONFIG.REGULAR_PRICE;
 
-    console.log(`[initiate] Offer active: ${offerActive} | Price: ₹${safeAmount}`);
+    console.log(`[initiate] Cart amount: ₹${safeAmount} | Products: ${products}`);
 
     const merchantOrderId = generateOrderId();
 
@@ -401,17 +398,18 @@ app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], asy
       customerEmail: email,
       customerPhone: whatsapp,
       amount: safeAmount,
+      products: products || CONFIG.PRODUCT_NAME,
     });
 
     // Store order info in memory for webhook cross-reference
     orderStore.set(merchantOrderId, {
-      name, email, whatsapp, bizType, goals,
+      name, email, whatsapp, bizType, goals, products, productIds,
       amount: safeAmount,
       state: 'PENDING',
       createdAt: new Date().toISOString(),
     });
 
-    logOrder({ event: 'ORDER_CREATED', merchantOrderId, phonePeOrderId: order.phonePeOrderId, name, email, whatsapp, bizType, amount: safeAmount });
+    logOrder({ event: 'ORDER_CREATED', merchantOrderId, phonePeOrderId: order.phonePeOrderId, name, email, whatsapp, bizType, amount: safeAmount, products });
 
     return res.json({
       success: true,
