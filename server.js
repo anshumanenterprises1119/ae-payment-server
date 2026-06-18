@@ -159,10 +159,11 @@ async function getAccessToken() {
 //  Header: Authorization: O-Bearer <access_token>
 //  Returns: { orderId, redirectUrl, state: "PENDING" }
 // ══════════════════════════════════════════════════════════════════
-async function createPaymentOrder({ merchantOrderId, customerName, customerEmail, customerPhone, amount, products }) {
+async function createPaymentOrder({ merchantOrderId, customerName, customerEmail, customerPhone, amount, products, redirectUrl }) {
   const accessToken = await getAccessToken();
   const url = `${CONFIG.BASE_URL}/checkout/v2/pay`;
   const productName = products || CONFIG.PRODUCT_NAME;
+  const finalRedirectUrl = redirectUrl || CONFIG.SUCCESS_URL;
 
   const payload = {
     merchantOrderId,
@@ -178,9 +179,9 @@ async function createPaymentOrder({ merchantOrderId, customerName, customerEmail
       type: 'PG_CHECKOUT',
       message: `Pay ₹${amount} for ${productName}`,
       merchantUrls: {
-        redirectUrl: CONFIG.SUCCESS_URL.includes('?')
-          ? `${CONFIG.SUCCESS_URL}&orderId=${merchantOrderId}`
-          : `${CONFIG.SUCCESS_URL}?orderId=${merchantOrderId}`,
+        redirectUrl: finalRedirectUrl.includes('?')
+          ? `${finalRedirectUrl}&orderId=${merchantOrderId}`
+          : `${finalRedirectUrl}?orderId=${merchantOrderId}`,
       },
     },
   };
@@ -377,7 +378,7 @@ async function triggerAssetDelivery(merchantOrderId, rawPhonePeStatus) {
 //  Returns: { success, redirectUrl, merchantOrderId, amount }
 app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], async (req, res) => {
   try {
-    const { name = 'Customer', email = '', whatsapp = '', bizType = '', goals = '', amount = 0, products = '', productIds = '' } = req.body;
+    const { name = 'Customer', email = '', whatsapp = '', bizType = '', goals = '', amount = 0, products = '', productIds = '', redirectUrl = '' } = req.body;
 
     if (!email && !whatsapp) {
       return res.status(400).json({ success: false, message: 'Email ya WhatsApp number zaroori hai.' });
@@ -388,7 +389,7 @@ app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], asy
     const requested = parseInt(amount || 0);
     const safeAmount = requested > 0 ? requested : CONFIG.REGULAR_PRICE;
 
-    console.log(`[initiate] Cart amount: ₹${safeAmount} | Products: ${products}`);
+    console.log(`[initiate] Cart amount: ₹${safeAmount} | Products: ${products} | RedirectUrl: ${redirectUrl}`);
 
     const merchantOrderId = generateOrderId();
 
@@ -399,6 +400,7 @@ app.post(['/initiate-phonepe-payment', '/webhook/initiate-phonepe-payment'], asy
       customerPhone: whatsapp,
       amount: safeAmount,
       products: products || CONFIG.PRODUCT_NAME,
+      redirectUrl: redirectUrl
     });
 
     // Store order info in memory for webhook cross-reference
